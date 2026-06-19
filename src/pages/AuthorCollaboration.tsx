@@ -1,7 +1,7 @@
-import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useEffect, useMemo, useState } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useStore } from '../store/useStore.ts';
-import { REPLY_TYPE_LABELS } from '../../shared/types.ts';
+import { REPLY_TYPE_LABELS, TARGET_TYPE_LABELS, ACTIVITY_STATUS_LABELS } from '../../shared/types.ts';
 import type { CollaborationRequest } from '../../shared/types.ts';
 import {
   Users,
@@ -17,6 +17,7 @@ import {
   BookOpen,
   Calendar,
   Feather,
+  Filter,
 } from 'lucide-react';
 
 const replyOptions = [
@@ -49,29 +50,72 @@ const replyOptions = [
   },
 ] as const;
 
+type StatusFilter = 'all' | CollaborationRequest['status'];
+type ReplyFilter = 'all' | NonNullable<CollaborationRequest['replyType']>;
+type BookFilter = 'all' | string;
+
 export default function AuthorCollaboration() {
   const navigate = useNavigate();
-  const { collaborations, activities, loading, fetchCollaborations, fetchActivities, replyToCollaboration } =
-    useStore();
+  const {
+    collaborations,
+    activities,
+    books,
+    loading,
+    fetchCollaborations,
+    fetchActivities,
+    fetchBooks,
+    replyToCollaboration,
+  } = useStore();
 
+  const [searchParams, setSearchParams] = useSearchParams();
   const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [filter, setFilter] = useState<'all' | 'pending' | 'replied'>('all');
-  const [selectedReply, setSelectedReply] = useState<Record<string, CollaborationRequest['replyType']>>({});
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>(
+    (searchParams.get('status') as StatusFilter) || 'all'
+  );
+  const [replyFilter, setReplyFilter] = useState<ReplyFilter>(
+    (searchParams.get('reply') as ReplyFilter) || 'all'
+  );
+  const [bookFilter, setBookFilter] = useState<BookFilter>(searchParams.get('book') || 'all');
+  const [selectedReply, setSelectedReply] = useState<
+    Record<string, CollaborationRequest['replyType']>
+  >({});
   const [replyNote, setReplyNote] = useState<Record<string, string>>({});
 
   useEffect(() => {
     fetchCollaborations();
     fetchActivities();
-  }, [fetchCollaborations, fetchActivities]);
+    fetchBooks();
+  }, [fetchCollaborations, fetchActivities, fetchBooks]);
 
-  const filteredCollabs =
-    filter === 'all'
-      ? collaborations
-      : collaborations.filter((c) => c.status === filter);
+  useEffect(() => {
+    const params: Record<string, string> = {};
+    if (statusFilter !== 'all') params.status = statusFilter;
+    if (replyFilter !== 'all') params.reply = replyFilter;
+    if (bookFilter !== 'all') params.book = bookFilter;
+    const next = new URLSearchParams(params);
+    if (next.toString() !== searchParams.toString()) {
+      setSearchParams(next, { replace: true });
+    }
+  }, [statusFilter, replyFilter, bookFilter, searchParams, setSearchParams]);
+
+  const activityOf = (collab: CollaborationRequest) =>
+    activities.find((a) => a.id === collab.activityId);
+
+  const filteredCollabs = useMemo(() => {
+    return collaborations.filter((c) => {
+      if (statusFilter !== 'all' && c.status !== statusFilter) return false;
+      if (replyFilter !== 'all' && c.replyType !== replyFilter) return false;
+      if (bookFilter !== 'all' && c.bookId !== bookFilter) return false;
+      return true;
+    });
+  }, [collaborations, statusFilter, replyFilter, bookFilter]);
 
   const getActivityTitle = (activityId: string) => {
     return activities.find((a) => a.id === activityId)?.title || '未知活动';
   };
+
+  const getBookTitle = (bookId: string) =>
+    books.find((b) => b.id === bookId)?.title || '未知作品';
 
   const handleReply = async (collabId: string) => {
     const replyType = selectedReply[collabId];
@@ -108,17 +152,21 @@ export default function AuthorCollaboration() {
     });
   };
 
+  const resetFilters = () => {
+    setStatusFilter('all');
+    setReplyFilter('all');
+    setBookFilter('all');
+  };
+  const hasActiveFilter = statusFilter !== 'all' || replyFilter !== 'all' || bookFilter !== 'all';
+
   return (
     <div className="p-8 animate-fade-in">
-      <button
-        onClick={() => navigate(-1)}
-        className="btn-ghost mb-6 flex items-center gap-2 -ml-4"
-      >
+      <button onClick={() => navigate(-1)} className="btn-ghost mb-6 flex items-center gap-2 -ml-4">
         <ArrowLeft className="w-4 h-4" />
         返回
       </button>
 
-      <div className="flex items-start justify-between mb-8">
+      <div className="flex items-start justify-between mb-8 flex-wrap gap-4">
         <div>
           <h1 className="text-3xl font-serif font-bold text-stone-100 mb-2">作者协同</h1>
           <p className="text-stone-400">
@@ -170,29 +218,63 @@ export default function AuthorCollaboration() {
       </div>
 
       <div className="card p-6">
-        <div className="flex items-center justify-between mb-6">
+        <div className="flex items-center justify-between mb-6 flex-wrap gap-4">
           <h2 className="text-xl font-serif font-semibold text-stone-100 flex items-center gap-2">
             <Users className="w-5 h-5 text-amber-500" />
             协同请求列表
           </h2>
-          <div className="flex gap-2">
-            {(['all', 'pending', 'replied'] as const).map((f) => (
+          <div className="flex items-center gap-3 flex-wrap">
+            <div className="flex items-center gap-2 text-stone-400">
+              <Filter className="w-4 h-4" />
+              <span className="text-sm">组合筛选</span>
+            </div>
+            <select
+              value={bookFilter}
+              onChange={(e) => setBookFilter(e.target.value)}
+              className="input-field w-auto py-2 text-sm"
+            >
+              <option value="all">全部作品</option>
+              {books.map((b) => (
+                <option key={b.id} value={b.id}>
+                  {b.title}
+                </option>
+              ))}
+            </select>
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}
+              className="input-field w-auto py-2 text-sm"
+            >
+              <option value="all">全部状态</option>
+              <option value="pending">待处理</option>
+              <option value="replied">已回复</option>
+            </select>
+            <select
+              value={replyFilter}
+              onChange={(e) => setReplyFilter(e.target.value as ReplyFilter)}
+              className="input-field w-auto py-2 text-sm"
+            >
+              <option value="all">全部回复类型</option>
+              {(['can_update', 'progress_only', 'not_participate'] as const).map((r) => (
+                <option key={r} value={r}>
+                  {REPLY_TYPE_LABELS[r]}
+                </option>
+              ))}
+            </select>
+            {hasActiveFilter && (
               <button
-                key={f}
-                onClick={() => setFilter(f)}
-                className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-                  filter === f
-                    ? 'bg-amber-600/20 text-amber-400 border border-amber-500/30'
-                    : 'text-stone-400 hover:text-stone-200 hover:bg-stone-700/30'
-                }`}
+                onClick={resetFilters}
+                className="btn-ghost py-2 px-3 flex items-center gap-1 text-sm"
               >
-                {f === 'all'
-                  ? '全部'
-                  : f === 'pending'
-                  ? '待处理'
-                  : '已回复'}
+                <X className="w-4 h-4" />
+                重置
               </button>
-            ))}
+            )}
+            {hasActiveFilter && (
+              <span className="text-xs text-amber-400 bg-amber-600/10 border border-amber-600/20 px-2 py-1 rounded">
+                已筛选：{filteredCollabs.length} / {collaborations.length}
+              </span>
+            )}
           </div>
         </div>
 
@@ -203,14 +285,28 @@ export default function AuthorCollaboration() {
         ) : filteredCollabs.length === 0 ? (
           <div className="text-center py-12 text-stone-500">
             <AlertCircle className="w-12 h-12 mx-auto mb-4 opacity-50" />
-            <p className="text-lg mb-2">暂无协同请求</p>
-            <p className="text-sm">在活动详情页可以向作者发送协同请求</p>
+            <p className="text-lg mb-2">
+              {hasActiveFilter ? '没有符合筛选条件的协同请求' : '暂无协同请求'}
+            </p>
+            <p className="text-sm">
+              {hasActiveFilter ? (
+                <>
+                  试试{' '}
+                  <button onClick={resetFilters} className="text-amber-400 underline">
+                    重置筛选
+                  </button>
+                </>
+              ) : (
+                '在活动详情页可以向作者发送协同请求'
+              )}
+            </p>
           </div>
         ) : (
           <div className="space-y-4">
             {filteredCollabs.map((collab, index) => {
               const isExpanded = expandedId === collab.id;
               const activityTitle = getActivityTitle(collab.activityId);
+              const activity = activityOf(collab);
 
               return (
                 <div
@@ -223,21 +319,35 @@ export default function AuthorCollaboration() {
                     onClick={() => setExpandedId(isExpanded ? null : collab.id)}
                   >
                     <div className="flex items-start justify-between">
-                      <div className="flex-1">
-                        <div className="flex items-center gap-3 mb-2">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-3 mb-2 flex-wrap">
                           <div className="w-10 h-10 bg-gradient-to-br from-amber-500 to-amber-700 rounded-full flex items-center justify-center text-white text-lg">
                             <Feather className="w-5 h-5" />
                           </div>
-                          <div>
+                          <div className="min-w-0 flex-1">
                             <h3 className="font-medium text-stone-100">{collab.authorName}</h3>
-                            <p className="text-sm text-stone-400">{activityTitle}</p>
+                            <p className="text-sm text-stone-400 truncate">{activityTitle}</p>
+                          </div>
+                          <div className="flex flex-col gap-1 items-end text-xs flex-shrink-0">
+                            {activity && (
+                              <span className="flex items-center gap-1 text-stone-500">
+                                <BookOpen className="w-3 h-3" />
+                                {getBookTitle(collab.bookId)}
+                              </span>
+                            )}
+                            {activity && (
+                              <span className="flex items-center gap-1 text-stone-500">
+                                <MessageSquare className="w-3 h-3" />
+                                {TARGET_TYPE_LABELS[activity.targetType]} · {activity.status && ACTIVITY_STATUS_LABELS[activity.status]}
+                              </span>
+                            )}
                           </div>
                         </div>
                         <p className="text-sm text-stone-400 line-clamp-2 ml-13">
                           {collab.readerExpectations}
                         </p>
                       </div>
-                      <div className="flex items-center gap-4 ml-4">
+                      <div className="flex items-center gap-4 ml-4 flex-shrink-0">
                         {collab.status === 'pending' ? (
                           <span className="tag tag-pending flex items-center">
                             <Clock className="w-3 h-3 mr-1" />
@@ -263,7 +373,7 @@ export default function AuthorCollaboration() {
                         )}
                       </div>
                     </div>
-                    <div className="flex items-center gap-4 mt-3 ml-13 text-xs text-stone-500">
+                    <div className="flex items-center gap-4 mt-3 ml-13 text-xs text-stone-500 flex-wrap">
                       <span className="flex items-center gap-1">
                         <Calendar className="w-3 h-3" />
                         {formatDate(collab.createdAt)}
@@ -285,7 +395,9 @@ export default function AuthorCollaboration() {
                           读者期待详情
                         </h4>
                         <div className="card-amber p-5 grain-overlay">
-                          <p className="text-stone-800 leading-relaxed">{collab.readerExpectations}</p>
+                          <p className="text-stone-800 leading-relaxed whitespace-pre-wrap">
+                            {collab.readerExpectations}
+                          </p>
                         </div>
                       </div>
 
@@ -309,9 +421,7 @@ export default function AuthorCollaboration() {
                                 {REPLY_TYPE_LABELS[collab.replyType]}
                               </span>
                             </div>
-                            {collab.replyNote && (
-                              <p className="text-stone-300">{collab.replyNote}</p>
-                            )}
+                            {collab.replyNote && <p className="text-stone-300">{collab.replyNote}</p>}
                           </div>
                         </div>
                       )}
@@ -348,7 +458,11 @@ export default function AuthorCollaboration() {
                                         isSelected ? 'bg-amber-600/30' : option.bgColor
                                       }`}
                                     >
-                                      <Icon className={`w-5 h-5 ${isSelected ? 'text-amber-400' : option.color}`} />
+                                      <Icon
+                                        className={`w-5 h-5 ${
+                                          isSelected ? 'text-amber-400' : option.color
+                                        }`}
+                                      />
                                     </div>
                                     <div>
                                       <h5
@@ -393,15 +507,14 @@ export default function AuthorCollaboration() {
                           </div>
 
                           <div className="flex justify-end gap-3">
-                            <button
-                              onClick={() => setExpandedId(null)}
-                              className="btn-secondary"
-                            >
+                            <button onClick={() => setExpandedId(null)} className="btn-secondary">
                               取消
                             </button>
                             <button
                               onClick={() => handleReply(collab.id)}
-                              disabled={!selectedReply[collab.id] || loading[`reply_${collab.id}`]}
+                              disabled={
+                                !selectedReply[collab.id] || loading[`reply_${collab.id}`]
+                              }
                               className="btn-primary flex items-center gap-2 disabled:opacity-50"
                             >
                               {loading[`reply_${collab.id}`] ? (

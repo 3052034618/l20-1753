@@ -40,4 +40,13 @@ router.put('/:id/reply', (req, res) => {
   }
 });
 
+router.put('/:id', (req, res) => {
+  try {
+    collaborationService.updateRequest(req.params.id, req.body);
+    res.json({ success: true });
+  } catch (error) {
+    res.status(400).json({ error: (error as Error).message });
+  }
+});
+
 export default router;

@@ -20,6 +20,10 @@ export class CollaborationService {
     }
     collaborationRepository.reply(id, replyType, replyNote);
   }
+
+  updateRequest(id: string, updates: Partial<Omit<CollaborationRequest, 'id'>>): void {
+    collaborationRepository.update(id, updates);
+  }
 }
 
 export const collaborationService = new CollaborationService();

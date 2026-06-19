@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useStore } from '../store/useStore.ts';
 import {
@@ -24,6 +24,14 @@ import {
   Clock,
   BarChart3,
   PieChart,
+  X,
+  Edit3,
+  Search,
+  Sparkles,
+  BookOpen,
+  Tag,
+  AlertCircle,
+  CheckCircle2,
 } from 'lucide-react';
 import {
   AreaChart,
@@ -39,6 +47,8 @@ import {
   Legend,
 } from 'recharts';
 
+type SentimentFilter = Comment['sentiment'] | 'all';
+
 export default function ActivityDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -53,10 +63,16 @@ export default function ActivityDetail() {
     fetchCollaborations,
     fetchBooks,
     createCollaboration,
+    updateCollaboration,
     updateActivity,
   } = useStore();
 
   const [activeTab, setActiveTab] = useState<'overview' | 'comments'>('overview');
+  const [sentimentFilter, setSentimentFilter] = useState<SentimentFilter>('all');
+  const [activeKeyword, setActiveKeyword] = useState<string | null>(null);
+  const [showExpectationDialog, setShowExpectationDialog] = useState(false);
+  const [expectationDraft, setExpectationDraft] = useState('');
+  const [editingCollabId, setEditingCollabId] = useState<string | null>(null);
 
   useEffect(() => {
     fetchActivities();
@@ -70,6 +86,26 @@ export default function ActivityDetail() {
   const activity = activities.find((a) => a.id === id);
   const stats = id ? activityStats[id] : undefined;
   const activityCollabs = collaborations.filter((c) => c.activityId === id);
+
+  const filteredComments = useMemo(() => {
+    if (!stats) return [] as Comment[];
+    return stats.hotComments.filter((c) => {
+      if (sentimentFilter !== 'all' && c.sentiment !== sentimentFilter) return false;
+      if (activeKeyword && !c.content.includes(activeKeyword)) return false;
+      return true;
+    });
+  }, [stats, sentimentFilter, activeKeyword]);
+
+  const sentimentCounts = useMemo(() => {
+    if (!stats)
+      return { all: 0, positive: 0, neutral: 0, negative: 0 };
+    return {
+      all: stats.hotComments.length,
+      positive: stats.hotComments.filter((c) => c.sentiment === 'positive').length,
+      neutral: stats.hotComments.filter((c) => c.sentiment === 'neutral').length,
+      negative: stats.hotComments.filter((c) => c.sentiment === 'negative').length,
+    };
+  }, [stats]);
 
   const getBookTitle = (bookId: string) => {
     return books.find((b) => b.id === bookId)?.title || '未知作品';
@@ -167,22 +203,75 @@ export default function ActivityDetail() {
       ]
     : [];
 
-  const handleSendCollaboration = async () => {
-    if (!stats) return;
-    const bookId = activity.bookIds[0];
-    const authorInfo = getAuthorForBook(bookId);
+  const generateExpectationSummary = (): string => {
+    if (!stats) return '';
+    const { participantCount, validUrgeCount, positiveRate, topKeywords, hotComments } = stats;
 
-    const collabData: Omit<CollaborationRequest, 'id' | 'status' | 'createdAt'> = {
-      activityId: activity.id,
-      bookId,
-      authorId: authorInfo.authorId,
-      authorName: authorInfo.authorName,
-      readerExpectations: `读者们对本次催更活动反响热烈，目前已有${stats.participantCount.toLocaleString()}人参与活动，有效催更${stats.validUrgeCount.toLocaleString()}次。读者留言中正面评价占比${(stats.positiveRate * 100).toFixed(0)}%，大家普遍期待作者能加快更新节奏，同时也表达了对作者身体健康的关心。热门关键词包括：${stats.topKeywords.slice(0, 5).map((k) => k.word).join('、')}。`,
-    };
+    const top3Keywords = topKeywords.slice(0, 3).map((k) => k.word);
+    const representativeComments = hotComments
+      .slice(0, 3)
+      .map((c) => `「${c.content.length > 30 ? c.content.slice(0, 30) + '…' : c.content}」`)
+      .join('；');
+
+    const positiveComments = hotComments.filter((c) => c.sentiment === 'positive').length;
+    const concernWords = topKeywords
+      .filter((k) => ['身体', '质量', '剧情', '伏笔'].includes(k.word))
+      .map((k) => k.word);
+
+    let summary = `读者们对本次催更活动反响热烈，目前已有${participantCount.toLocaleString()}人参与活动，有效催更${validUrgeCount.toLocaleString()}次。读者留言中正面评价占比${(
+      positiveRate * 100
+    ).toFixed(0)}%，${positiveComments > 0 ? `共${positiveComments}条留言明确表达支持与鼓励，` : ''}`;
+
+    if (top3Keywords.length) {
+      summary += `大家最关心的话题集中在「${top3Keywords.join('」、「')}」。`;
+    }
+    if (representativeComments) {
+      summary += `\n\n典型读者声音：${representativeComments}。`;
+    }
+    if (concernWords.length) {
+      summary += `\n\n读者也在留言中反复提到：${concernWords.join('、')}等方面，希望作者能在创作节奏中兼顾质量与健康。`;
+    }
+    summary += `\n\n请您根据自身创作节奏，选择合适的方式回应读者期待，感谢您的配合！`;
+
+    return summary;
+  };
+
+  const openExpectationDialog = (existing?: CollaborationRequest) => {
+    if (existing) {
+      setExpectationDraft(existing.readerExpectations);
+      setEditingCollabId(existing.id);
+    } else {
+      setExpectationDraft(generateExpectationSummary());
+      setEditingCollabId(null);
+    }
+    setShowExpectationDialog(true);
+  };
+
+  const handleSendExpectation = async () => {
+    if (!expectationDraft.trim() || !activity) return;
 
     try {
-      await createCollaboration(collabData);
+      if (editingCollabId) {
+        await updateCollaboration(editingCollabId, {
+          readerExpectations: expectationDraft,
+          status: 'pending',
+          replyType: undefined,
+          replyNote: undefined,
+        });
+      } else {
+        const bookId = activity.bookIds[0];
+        const authorInfo = getAuthorForBook(bookId);
+        await createCollaboration({
+          activityId: activity.id,
+          bookId,
+          authorId: authorInfo.authorId,
+          authorName: authorInfo.authorName,
+          readerExpectations: expectationDraft,
+        });
+      }
       await fetchCollaborations();
+      setShowExpectationDialog(false);
+      setEditingCollabId(null);
     } catch (error) {
       console.error('发送失败:', error);
     }
@@ -195,20 +284,31 @@ export default function ActivityDetail() {
 
   const pendingCollab = activityCollabs.find((c) => c.status === 'pending');
   const repliedCollab = activityCollabs.find((c) => c.status === 'replied');
+  const latestCollab = activityCollabs[0];
+
+  const highlightContent = (content: string, keyword: string | null) => {
+    if (!keyword) return content;
+    const idx = content.indexOf(keyword);
+    if (idx < 0) return content;
+    return (
+      <>
+        {content.slice(0, idx)}
+        <mark className="bg-amber-500/40 text-amber-100 px-0.5 rounded">{keyword}</mark>
+        {content.slice(idx + keyword.length)}
+      </>
+    );
+  };
 
   return (
     <div className="p-8 animate-fade-in">
-      <button
-        onClick={() => navigate(-1)}
-        className="btn-ghost mb-6 flex items-center gap-2 -ml-4"
-      >
+      <button onClick={() => navigate(-1)} className="btn-ghost mb-6 flex items-center gap-2 -ml-4">
         <ArrowLeft className="w-4 h-4" />
         返回活动列表
       </button>
 
-      <div className="flex items-start justify-between mb-8">
-        <div>
-          <div className="flex items-center gap-3 mb-2">
+      <div className="flex items-start justify-between mb-8 flex-wrap gap-4">
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-3 mb-2 flex-wrap">
             <h1 className="text-3xl font-serif font-bold text-stone-100">{activity.title}</h1>
             <span className={`tag ${getStatusClass(activity.status)}`}>
               {activity.status === 'active' && <Play className="w-3 h-3 mr-1" />}
@@ -228,14 +328,12 @@ export default function ActivityDetail() {
             </span>
             {activity.bookIds && activity.bookIds.length > 0 && (
               <span className="text-stone-400">
-                关联作品：{activity.bookIds.map(bid => getBookTitle(bid)).join('、')}
+                关联作品：{activity.bookIds.map((bid) => getBookTitle(bid)).join('、')}
               </span>
             )}
           </div>
           {activity.rewardText && (
-            <div className="mt-2 text-sm text-stone-400">
-              奖励说明：{activity.rewardText}
-            </div>
+            <div className="mt-2 text-sm text-stone-400">奖励说明：{activity.rewardText}</div>
           )}
           {activity.allowRepeat !== undefined && (
             <div className="mt-1 text-sm text-stone-500">
@@ -244,14 +342,23 @@ export default function ActivityDetail() {
           )}
         </div>
         <div className="flex gap-3">
-          {!pendingCollab && !repliedCollab && (
+          {!pendingCollab && (
             <button
-              onClick={handleSendCollaboration}
-              disabled={loading.createCollab}
+              onClick={() => openExpectationDialog()}
+              disabled={loading.createCollab || loading.updateCollab}
               className="btn-outline flex items-center gap-2"
             >
-              <Send className="w-4 h-4" />
-              发送协同请求
+              {latestCollab ? (
+                <>
+                  <Edit3 className="w-4 h-4" />
+                  重发读者期待
+                </>
+              ) : (
+                <>
+                  <Send className="w-4 h-4" />
+                  发送协同请求
+                </>
+              )}
             </button>
           )}
           {activity.status !== 'draft' && (
@@ -269,15 +376,20 @@ export default function ActivityDetail() {
               <Heart className="w-6 h-6 text-ink-500" />
             </div>
             <div className="flex-1">
-              <div className="flex items-center gap-3 mb-2">
+              <div className="flex items-center gap-3 mb-2 flex-wrap">
                 <h3 className="font-medium text-ink-500">作者已回复</h3>
-                <span className="tag tag-active">
-                  {REPLY_TYPE_LABELS[repliedCollab.replyType!]}
-                </span>
+                <span className="tag tag-active">{REPLY_TYPE_LABELS[repliedCollab.replyType!]}</span>
                 <span className="text-stone-500 text-sm">
                   <Clock className="w-3 h-3 inline mr-1" />
                   {repliedCollab.repliedAt && new Date(repliedCollab.repliedAt).toLocaleString('zh-CN')}
                 </span>
+                <button
+                  onClick={() => openExpectationDialog(repliedCollab)}
+                  className="btn-ghost py-1 px-2 text-xs ml-auto"
+                >
+                  <Edit3 className="w-3 h-3 inline mr-1" />
+                  重新整理并发送
+                </button>
               </div>
               <p className="text-stone-300">{repliedCollab.replyNote}</p>
               <div className="mt-3 p-3 bg-amber-600/10 border border-amber-600/20 rounded-lg">
@@ -297,10 +409,23 @@ export default function ActivityDetail() {
               <Clock className="w-6 h-6 text-amber-500 animate-pulse-soft" />
             </div>
             <div className="flex-1">
-              <h3 className="font-medium text-amber-400 mb-2">等待作者回复</h3>
+              <div className="flex items-center gap-3 mb-2 flex-wrap">
+                <h3 className="font-medium text-amber-400">等待作者回复</h3>
+                <button
+                  onClick={() => openExpectationDialog(pendingCollab)}
+                  className="btn-ghost py-1 px-2 text-xs ml-auto"
+                >
+                  <Edit3 className="w-3 h-3 inline mr-1" />
+                  更新读者期待
+                </button>
+              </div>
               <p className="text-stone-400 text-sm">
                 已向<strong>{pendingCollab.authorName}</strong>发送协同请求，等待确认回复。作者可选择"可加更"、"只能发进度说明"或"不参与活动"。
               </p>
+              <div className="mt-3 p-3 bg-stone-800/50 rounded-lg border border-stone-700/30">
+                <p className="text-xs text-stone-500 mb-1">已发送的读者期待：</p>
+                <p className="text-sm text-stone-300 whitespace-pre-wrap">{pendingCollab.readerExpectations}</p>
+              </div>
             </div>
           </div>
         </div>
@@ -390,7 +515,7 @@ export default function ActivityDetail() {
               }`}
             >
               <MessageSquare className="w-4 h-4 inline mr-2" />
-              读者留言 ({stats.hotComments.length})
+              读者反应分析 ({stats.hotComments.length})
             </button>
           </div>
 
@@ -473,26 +598,54 @@ export default function ActivityDetail() {
 
               <div className="card p-6 lg:col-span-3 animate-slide-up" style={{ animationDelay: '100ms' }}>
                 <h3 className="font-serif text-lg font-semibold text-stone-100 mb-4 flex items-center gap-2">
-                  <MessageSquare className="w-5 h-5 text-amber-500" />
+                  <Tag className="w-5 h-5 text-amber-500" />
                   高频关键词
+                  <span className="text-sm font-normal text-stone-500 ml-2">
+                    点击关键词可筛选下方留言
+                  </span>
                 </h3>
                 {stats.topKeywords.length > 0 ? (
                   <div className="flex flex-wrap gap-3">
-                    {stats.topKeywords.map((keyword, index) => (
-                      <div
-                        key={keyword.word}
-                        className="group relative px-4 py-2 rounded-xl bg-gradient-to-br from-amber-600/20 to-amber-700/10 border border-amber-600/30 hover:border-amber-500/50 transition-all duration-300 cursor-default"
-                        style={{
-                          fontSize: `${Math.max(14, 24 - index * 1.5)}px`,
-                          fontWeight: index < 3 ? 600 : 400,
-                        }}
+                    {stats.topKeywords.map((keyword, index) => {
+                      const isActive = activeKeyword === keyword.word;
+                      return (
+                        <button
+                          key={keyword.word}
+                          onClick={() => {
+                            setActiveKeyword(isActive ? null : keyword.word);
+                            if (!isActive) setActiveTab('comments');
+                          }}
+                          className={`group relative px-4 py-2 rounded-xl border transition-all duration-300 ${
+                            isActive
+                              ? 'bg-amber-600/40 border-amber-400 ring-2 ring-amber-500/50'
+                              : 'bg-gradient-to-br from-amber-600/20 to-amber-700/10 border-amber-600/30 hover:border-amber-500/50 cursor-pointer'
+                          }`}
+                          style={{
+                            fontSize: `${Math.max(14, 24 - index * 1.5)}px`,
+                            fontWeight: index < 3 ? 600 : 400,
+                          }}
+                        >
+                          <span className={isActive ? 'text-amber-100' : 'text-amber-400'}>
+                            {keyword.word}
+                          </span>
+                          <span
+                            className={`ml-2 text-xs px-1.5 py-0.5 rounded ${
+                              isActive ? 'text-amber-100 bg-amber-400/30' : 'text-amber-600 bg-amber-600/20'
+                            }`}
+                          >
+                            {keyword.count}
+                          </span>
+                        </button>
+                      );
+                    })}
+                    {activeKeyword && (
+                      <button
+                        onClick={() => setActiveKeyword(null)}
+                        className="px-3 py-2 rounded-xl bg-stone-700/50 text-stone-300 hover:bg-stone-700 text-sm border border-stone-600/50"
                       >
-                        <span className="text-amber-400">{keyword.word}</span>
-                        <span className="ml-2 text-xs text-amber-600 bg-amber-600/20 px-1.5 py-0.5 rounded">
-                          {keyword.count}
-                        </span>
-                      </div>
-                    ))}
+                        清除关键词筛选 <X className="w-3 h-3 inline ml-1" />
+                      </button>
+                    )}
                   </div>
                 ) : (
                   <p className="text-stone-500 text-sm">暂无关键词数据，等待读者留言</p>
@@ -502,46 +655,208 @@ export default function ActivityDetail() {
           )}
 
           {activeTab === 'comments' && (
-            <div className="card p-6 animate-slide-up">
-              <h3 className="font-serif text-lg font-semibold text-stone-100 mb-6">热门留言</h3>
-              {stats.hotComments.length > 0 ? (
-                <div className="space-y-4">
-                  {stats.hotComments.map((comment, index) => (
-                    <div
-                      key={comment.id}
-                      className="p-4 bg-stone-800/30 rounded-xl border border-stone-700/50 hover:border-amber-600/20 transition-all animate-slide-up"
-                      style={{ animationDelay: `${index * 50}ms` }}
-                    >
-                      <div className="flex items-start justify-between mb-2">
-                        <div className="flex items-center gap-3">
-                          <div className="w-10 h-10 bg-gradient-to-br from-amber-500 to-amber-700 rounded-full flex items-center justify-center text-white font-medium">
-                            {comment.userName?.charAt(0) || '?'}
-                          </div>
-                          <div>
-                            <p className="font-medium text-stone-100">{comment.userName || '匿名'}</p>
-                            <p className="text-xs text-stone-500">
-                              {comment.createdAt ? new Date(comment.createdAt).toLocaleString('zh-CN') : ''}
-                            </p>
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-3">
-                          <span className={`tag ${getSentimentClass(comment.sentiment)} flex items-center`}>
-                            {getSentimentIcon(comment.sentiment)}
-                            {getSentimentLabel(comment.sentiment)}
+            <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 animate-slide-up">
+              <div className="lg:col-span-3">
+                <div className="card p-6 h-full">
+                  <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
+                    <h3 className="font-serif text-lg font-semibold text-stone-100 flex items-center gap-2">
+                      <Sparkles className="w-5 h-5 text-amber-500" />
+                      读者反应分析
+                      {activeKeyword && (
+                        <span className="text-sm font-normal px-2 py-0.5 rounded bg-amber-600/20 text-amber-400 border border-amber-600/30 ml-1">
+                          关键词：{activeKeyword}
+                        </span>
+                      )}
+                    </h3>
+                    <div className="flex gap-2">
+                      {(['all', 'positive', 'neutral', 'negative'] as SentimentFilter[]).map((s) => (
+                        <button
+                          key={s}
+                          onClick={() => setSentimentFilter(s)}
+                          className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all flex items-center gap-1 ${
+                            sentimentFilter === s
+                              ? s === 'positive'
+                                ? 'bg-emerald-600/20 text-emerald-400 border border-emerald-500/30'
+                                : s === 'negative'
+                                ? 'bg-red-600/20 text-red-400 border border-red-500/30'
+                                : s === 'neutral'
+                                ? 'bg-stone-600/30 text-stone-200 border border-stone-500/30'
+                                : 'bg-amber-600/20 text-amber-400 border border-amber-500/30'
+                              : 'text-stone-400 hover:text-stone-200 hover:bg-stone-700/30'
+                          }`}
+                        >
+                          {s === 'all' ? '全部' : s === 'positive' ? '正向' : s === 'neutral' ? '中性' : '负向'}
+                          <span className="ml-1 text-xs opacity-80">
+                            {s === 'all'
+                              ? sentimentCounts.all
+                              : s === 'positive'
+                              ? sentimentCounts.positive
+                              : s === 'neutral'
+                              ? sentimentCounts.neutral
+                              : sentimentCounts.negative}
                           </span>
-                          <span className="flex items-center gap-1 text-stone-400 text-sm">
-                            <ThumbsUp className="w-4 h-4" />
-                            {(comment.likes ?? 0).toLocaleString()}
-                          </span>
-                        </div>
-                      </div>
-                      <p className="text-stone-200 ml-13 pl-[52px]">{comment.content}</p>
+                        </button>
+                      ))}
                     </div>
-                  ))}
+                  </div>
+
+                  {filteredComments.length > 0 ? (
+                    <div className="space-y-4">
+                      {filteredComments.map((comment, index) => (
+                        <div
+                          key={comment.id}
+                          className="p-4 bg-stone-800/30 rounded-xl border border-stone-700/50 hover:border-amber-600/20 transition-all animate-slide-up"
+                          style={{ animationDelay: `${index * 50}ms` }}
+                        >
+                          <div className="flex items-start justify-between mb-2">
+                            <div className="flex items-center gap-3">
+                              <div className="w-10 h-10 bg-gradient-to-br from-amber-500 to-amber-700 rounded-full flex items-center justify-center text-white font-medium">
+                                {comment.userName?.charAt(0) || '?'}
+                              </div>
+                              <div>
+                                <p className="font-medium text-stone-100">
+                                  {comment.userName || '匿名'}
+                                </p>
+                                <p className="text-xs text-stone-500">
+                                  {comment.createdAt
+                                    ? new Date(comment.createdAt).toLocaleString('zh-CN')
+                                    : ''}
+                                </p>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-3">
+                              <span
+                                className={`tag ${getSentimentClass(
+                                  comment.sentiment
+                                )} flex items-center`}
+                              >
+                                {getSentimentIcon(comment.sentiment)}
+                                {getSentimentLabel(comment.sentiment)}
+                              </span>
+                              <span className="flex items-center gap-1 text-stone-400 text-sm">
+                                <ThumbsUp className="w-4 h-4" />
+                                {(comment.likes ?? 0).toLocaleString()}
+                              </span>
+                            </div>
+                          </div>
+                          <p className="text-stone-200 ml-[52px] leading-relaxed">
+                            {highlightContent(comment.content, activeKeyword)}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="text-center py-12 text-stone-500">
+                      {stats.hotComments.length === 0 ? (
+                        <>
+                          <AlertCircle className="w-10 h-10 mx-auto mb-3 opacity-50" />
+                          <p className="text-lg mb-1">暂无留言数据</p>
+                          <p className="text-sm">等读者陆续参与催更活动后再来分析</p>
+                        </>
+                      ) : (
+                        <>
+                          <Search className="w-10 h-10 mx-auto mb-3 opacity-50" />
+                          <p className="text-lg mb-1">没有匹配的留言</p>
+                          <p className="text-sm">
+                            试试选择
+                            <button
+                              onClick={() => {
+                                setSentimentFilter('all');
+                                setActiveKeyword(null);
+                              }}
+                              className="text-amber-400 underline mx-1"
+                            >
+                              全部留言
+                            </button>
+                            看看
+                          </p>
+                        </>
+                      )}
+                    </div>
+                  )}
                 </div>
-              ) : (
-                <p className="text-center py-12 text-stone-500">暂无留言数据</p>
-              )}
+              </div>
+
+              <div className="space-y-6">
+                <div className="card p-5">
+                  <h4 className="font-serif text-base font-semibold text-stone-100 mb-4 flex items-center gap-2">
+                    <Tag className="w-4 h-4 text-amber-500" />
+                    相关关键词
+                  </h4>
+                  {stats.topKeywords.length > 0 ? (
+                    <div className="space-y-2">
+                      {stats.topKeywords.map((kw) => {
+                        const hitCount = stats.hotComments.filter((c) =>
+                          c.content.includes(kw.word)
+                        ).length;
+                        const isActive = activeKeyword === kw.word;
+                        return (
+                          <button
+                            key={kw.word}
+                            onClick={() => setActiveKeyword(isActive ? null : kw.word)}
+                            className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-sm transition-all ${
+                              isActive
+                                ? 'bg-amber-600/30 border border-amber-500/40'
+                                : 'bg-stone-800/30 border border-stone-700/40 hover:border-amber-600/30'
+                            }`}
+                          >
+                            <span className={isActive ? 'text-amber-300' : 'text-stone-300'}>
+                              {kw.word}
+                            </span>
+                            <span className="flex items-center gap-2">
+                              <span
+                                className={`text-xs ${
+                                  isActive ? 'text-amber-400/80' : 'text-stone-500'
+                                }`}
+                              >
+                                {hitCount}条留言
+                              </span>
+                              <CheckCircle2
+                                className={`w-3.5 h-3.5 ${
+                                  isActive ? 'text-amber-400' : 'text-stone-600'
+                                }`}
+                              />
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-stone-500">暂无关键词</p>
+                  )}
+                </div>
+
+                <div className="card p-5">
+                  <h4 className="font-serif text-base font-semibold text-stone-100 mb-4 flex items-center gap-2">
+                    <BookOpen className="w-4 h-4 text-amber-500" />
+                    快速洞察
+                  </h4>
+                  <div className="space-y-3 text-sm">
+                    <div className="p-3 rounded-lg bg-stone-800/30 border border-stone-700/40">
+                      <p className="text-stone-400 mb-1">整体态度</p>
+                      <p className="text-stone-200">
+                        {stats.positiveRate >= 0.7
+                          ? '整体氛围积极，读者对本书充满热情'
+                          : stats.positiveRate >= 0.5
+                          ? '态度分化，建议关注负向声音'
+                          : '负向评价较多，建议及时回应安抚'}
+                      </p>
+                    </div>
+                    <div className="p-3 rounded-lg bg-stone-800/30 border border-stone-700/40">
+                      <p className="text-stone-400 mb-1">期待方向</p>
+                      <p className="text-stone-200">
+                        {stats.topKeywords.slice(0, 3).map((k) => k.word).join('／') || '暂无明显共识'}
+                      </p>
+                    </div>
+                    {latestCollab && latestCollab.status === 'replied' && latestCollab.replyType && (
+                      <div className="p-3 rounded-lg bg-amber-600/10 border border-amber-600/20">
+                        <p className="text-stone-400 mb-1">当前前台提示</p>
+                        <p className="text-amber-300">{getFrontHintText(latestCollab.replyType)}</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
             </div>
           )}
         </>
@@ -550,6 +865,84 @@ export default function ActivityDetail() {
       {loading[`stats_${id}`] && (
         <div className="flex items-center justify-center py-12">
           <div className="animate-spin w-8 h-8 border-2 border-amber-500 border-t-transparent rounded-full" />
+        </div>
+      )}
+
+      {showExpectationDialog && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-stone-950/70 backdrop-blur-sm animate-fade-in">
+          <div className="card p-6 w-full max-w-2xl max-h-[85vh] overflow-y-auto animate-slide-up">
+            <div className="flex items-center justify-between mb-5">
+              <div>
+                <h3 className="text-xl font-serif font-semibold text-stone-100 flex items-center gap-2">
+                  <Sparkles className="w-5 h-5 text-amber-500" />
+                  {editingCollabId ? '更新读者期待摘要' : '整理并发送读者期待'}
+                </h3>
+                <p className="text-sm text-stone-500 mt-1">
+                  {editingCollabId
+                    ? '系统已填入之前发送的内容，您可编辑后重新发送，作者端会收到最新版本'
+                    : '已基于真实留言自动生成摘要，您可编辑确认后发送给作者'}
+                </p>
+              </div>
+              <button
+                onClick={() => setShowExpectationDialog(false)}
+                className="btn-ghost p-2"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="mb-4 flex flex-wrap gap-2">
+              <button
+                onClick={() => setExpectationDraft(generateExpectationSummary())}
+                className="btn-outline py-1.5 px-3 text-sm"
+              >
+                <Sparkles className="w-4 h-4 inline mr-1" />
+                重新生成摘要
+              </button>
+              <button
+                onClick={() => setExpectationDraft('')}
+                className="btn-ghost py-1.5 px-3 text-sm"
+              >
+                清空
+              </button>
+            </div>
+
+            <div className="mb-4">
+              <label className="block text-stone-300 font-medium mb-2">读者期待摘要</label>
+              <textarea
+                rows={10}
+                value={expectationDraft}
+                onChange={(e) => setExpectationDraft(e.target.value)}
+                className="input-field resize-none leading-relaxed"
+                placeholder="请输入希望作者了解的读者期待..."
+              />
+              <div className="flex justify-between mt-2 text-xs text-stone-500">
+                <span>{expectationDraft.length} 字</span>
+                <span>建议包含：参与概况 · 典型留言 · 关键词 · 关切与期待</span>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-3 pt-4 border-t border-stone-700/50">
+              <button
+                onClick={() => setShowExpectationDialog(false)}
+                className="btn-secondary"
+              >
+                取消
+              </button>
+              <button
+                onClick={handleSendExpectation}
+                disabled={
+                  !expectationDraft.trim() ||
+                  loading.createCollab ||
+                  (editingCollabId && loading[`updateCollab_${editingCollabId}`])
+                }
+                className="btn-primary flex items-center gap-2 disabled:opacity-50"
+              >
+                <Send className="w-4 h-4" />
+                {editingCollabId ? '更新并重新发送' : '发送给作者'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

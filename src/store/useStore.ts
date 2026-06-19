@@ -18,6 +18,7 @@ interface StoreState {
   updateActivity: (id: string, updates: Partial<Activity>) => Promise<void>;
   createCollaboration: (data: Omit<CollaborationRequest, 'id' | 'status' | 'createdAt'>) => Promise<CollaborationRequest>;
   replyToCollaboration: (id: string, replyType: CollaborationRequest['replyType'], replyNote?: string) => Promise<void>;
+  updateCollaboration: (id: string, updates: Partial<CollaborationRequest>) => Promise<void>;
   setError: (error: string | null) => void;
 }
 
@@ -126,14 +127,34 @@ export const useStore = create<StoreState>((set, get) => ({
     try {
       await api.put(`/collaborations/${id}/reply`, { replyType, replyNote });
       set({
-        collaborations: get().collaborations.map(c =>
+        collaborations: get().collaborations.map((c) =>
           c.id === id
-            ? { ...c, status: 'replied' as const, replyType, replyNote, repliedAt: new Date().toISOString() }
+            ? {
+                ...c,
+                status: 'replied' as const,
+                replyType,
+                replyNote,
+                repliedAt: new Date().toISOString(),
+              }
             : c
         ),
       });
     } finally {
       set({ loading: { ...get().loading, [`reply_${id}`]: false } });
+    }
+  },
+
+  updateCollaboration: async (id, updates) => {
+    set({ loading: { ...get().loading, [`updateCollab_${id}`]: true } });
+    try {
+      await api.put(`/collaborations/${id}`, updates);
+      set({
+        collaborations: get().collaborations.map((c) =>
+          c.id === id ? { ...c, ...updates } : c
+        ),
+      });
+    } finally {
+      set({ loading: { ...get().loading, [`updateCollab_${id}`]: false } });
     }
   },
 

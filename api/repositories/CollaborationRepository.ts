@@ -70,6 +70,33 @@ export class CollaborationRepository {
     `).run(replyType, replyNote || null, new Date().toISOString(), id);
   }
 
+  update(id: string, updates: Partial<Omit<CollaborationRequest, 'id'>>): void {
+    const setClauses: string[] = [];
+    const params: (string | number | boolean | null)[] = [];
+
+    if (updates.readerExpectations !== undefined) {
+      setClauses.push('reader_expectations = ?');
+      params.push(updates.readerExpectations);
+    }
+    if (updates.status !== undefined) {
+      setClauses.push('status = ?');
+      params.push(updates.status);
+    }
+    if (updates.replyType !== undefined) {
+      setClauses.push('reply_type = ?');
+      params.push(updates.replyType);
+    }
+    if (updates.replyNote !== undefined) {
+      setClauses.push('reply_note = ?');
+      params.push(updates.replyNote ?? null);
+    }
+
+    if (setClauses.length === 0) return;
+
+    params.push(id);
+    db.prepare(`UPDATE collaboration_requests SET ${setClauses.join(', ')} WHERE id = ?`).run(...params);
+  }
+
   private mapRowToCollaboration(row: CollaborationRow): CollaborationRequest {
     return {
       id: row.id,
