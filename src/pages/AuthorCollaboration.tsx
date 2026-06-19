@@ -79,6 +79,7 @@ export default function AuthorCollaboration() {
 
     try {
       await replyToCollaboration(collabId, replyType, replyNote[collabId]);
+      await fetchCollaborations();
       setSelectedReply((prev) => {
         const next = { ...prev };
         delete next[collabId];
@@ -96,7 +97,10 @@ export default function AuthorCollaboration() {
   };
 
   const formatDate = (dateStr: string) => {
-    return new Date(dateStr).toLocaleString('zh-CN', {
+    if (!dateStr) return '';
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return dateStr;
+    return d.toLocaleString('zh-CN', {
       month: 'short',
       day: 'numeric',
       hour: '2-digit',

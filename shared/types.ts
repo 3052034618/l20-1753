@@ -31,6 +31,7 @@ export interface ActivityStats {
   trendData: { date: string; count: number }[];
   topKeywords: { word: string; count: number }[];
   hotComments: Comment[];
+  sentimentCounts: { positive: number; neutral: number; negative: number };
 }
 
 export interface Comment {

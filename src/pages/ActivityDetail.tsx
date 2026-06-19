@@ -26,15 +26,13 @@ import {
   PieChart,
 } from 'lucide-react';
 import {
-  LineChart,
-  Line,
+  AreaChart,
+  Area,
   XAxis,
   YAxis,
   CartesianGrid,
   Tooltip,
   ResponsiveContainer,
-  AreaChart,
-  Area,
   PieChart as RechartsPieChart,
   Pie,
   Cell,
@@ -48,10 +46,12 @@ export default function ActivityDetail() {
     activities,
     activityStats,
     collaborations,
+    books,
     loading,
     fetchActivities,
     fetchActivityStats,
     fetchCollaborations,
+    fetchBooks,
     createCollaboration,
     updateActivity,
   } = useStore();
@@ -61,14 +61,35 @@ export default function ActivityDetail() {
   useEffect(() => {
     fetchActivities();
     fetchCollaborations();
+    fetchBooks();
     if (id) {
       fetchActivityStats(id);
     }
-  }, [fetchActivities, fetchActivityStats, fetchCollaborations, id]);
+  }, [fetchActivities, fetchActivityStats, fetchCollaborations, fetchBooks, id]);
 
   const activity = activities.find((a) => a.id === id);
   const stats = id ? activityStats[id] : undefined;
   const activityCollabs = collaborations.filter((c) => c.activityId === id);
+
+  const getBookTitle = (bookId: string) => {
+    return books.find((b) => b.id === bookId)?.title || '未知作品';
+  };
+
+  const getAuthorForBook = (bookId: string) => {
+    const book = books.find((b) => b.id === bookId);
+    if (!book) return { authorId: 'a1', authorName: '作者' };
+    if (book.author.includes('乌贼')) return { authorId: 'a1', authorName: book.author };
+    if (book.author.includes('狐尾')) return { authorId: 'a2', authorName: book.author };
+    if (book.author.includes('辰东')) return { authorId: 'a3', authorName: book.author };
+    return { authorId: 'a1', authorName: book.author };
+  };
+
+  const formatDate = (dateStr: string) => {
+    if (!dateStr) return '';
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return dateStr;
+    return d.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' });
+  };
 
   if (!activity) {
     return (
@@ -125,28 +146,43 @@ export default function ActivityDetail() {
     }
   };
 
+  const getFrontHintText = (replyType: CollaborationRequest['replyType']) => {
+    switch (replyType) {
+      case 'can_update':
+        return '作者已确认可加更，敬请期待！';
+      case 'progress_only':
+        return '作者将发布进度说明，感谢理解与支持';
+      case 'not_participate':
+        return '作者暂不参与本次活动，感谢读者理解';
+      default:
+        return '';
+    }
+  };
+
   const sentimentData = stats
     ? [
-        { name: '正向', value: stats.positiveRate * 100, color: '#10B981' },
-        { name: '中性', value: (1 - stats.positiveRate) * 60, color: '#78716C' },
-        { name: '负向', value: (1 - stats.positiveRate) * 40, color: '#EF4444' },
+        { name: '正向', value: stats.sentimentCounts.positive, color: '#10B981' },
+        { name: '中性', value: stats.sentimentCounts.neutral, color: '#78716C' },
+        { name: '负向', value: stats.sentimentCounts.negative, color: '#EF4444' },
       ]
     : [];
 
   const handleSendCollaboration = async () => {
     if (!stats) return;
+    const bookId = activity.bookIds[0];
+    const authorInfo = getAuthorForBook(bookId);
 
     const collabData: Omit<CollaborationRequest, 'id' | 'status' | 'createdAt'> = {
       activityId: activity.id,
-      bookId: activity.bookIds[0],
-      authorId: 'a1',
-      authorName: '作者名称',
+      bookId,
+      authorId: authorInfo.authorId,
+      authorName: authorInfo.authorName,
       readerExpectations: `读者们对本次催更活动反响热烈，目前已有${stats.participantCount.toLocaleString()}人参与活动，有效催更${stats.validUrgeCount.toLocaleString()}次。读者留言中正面评价占比${(stats.positiveRate * 100).toFixed(0)}%，大家普遍期待作者能加快更新节奏，同时也表达了对作者身体健康的关心。热门关键词包括：${stats.topKeywords.slice(0, 5).map((k) => k.word).join('、')}。`,
     };
 
     try {
       await createCollaboration(collabData);
-      alert('协同请求已发送！');
+      await fetchCollaborations();
     } catch (error) {
       console.error('发送失败:', error);
     }
@@ -181,16 +217,31 @@ export default function ActivityDetail() {
             </span>
           </div>
           <p className="text-stone-400 mb-4">{activity.displayText}</p>
-          <div className="flex items-center gap-6 text-sm text-stone-500">
+          <div className="flex items-center gap-6 text-sm text-stone-500 flex-wrap">
             <span className="flex items-center gap-2">
               <Calendar className="w-4 h-4" />
-              {activity.startDate} — {activity.endDate}
+              {formatDate(activity.startDate)} — {formatDate(activity.endDate)}
             </span>
             <span className="flex items-center gap-2">
               <Target className="w-4 h-4" />
-              {TARGET_TYPE_LABELS[activity.targetType]} · {activity.targetValue.toLocaleString()}
+              {TARGET_TYPE_LABELS[activity.targetType]} · {(activity.targetValue ?? 0).toLocaleString()}
             </span>
+            {activity.bookIds && activity.bookIds.length > 0 && (
+              <span className="text-stone-400">
+                关联作品：{activity.bookIds.map(bid => getBookTitle(bid)).join('、')}
+              </span>
+            )}
           </div>
+          {activity.rewardText && (
+            <div className="mt-2 text-sm text-stone-400">
+              奖励说明：{activity.rewardText}
+            </div>
+          )}
+          {activity.allowRepeat !== undefined && (
+            <div className="mt-1 text-sm text-stone-500">
+              重复参与：{activity.allowRepeat ? '允许' : '不允许'}
+            </div>
+          )}
         </div>
         <div className="flex gap-3">
           {!pendingCollab && !repliedCollab && (
@@ -229,6 +280,11 @@ export default function ActivityDetail() {
                 </span>
               </div>
               <p className="text-stone-300">{repliedCollab.replyNote}</p>
+              <div className="mt-3 p-3 bg-amber-600/10 border border-amber-600/20 rounded-lg">
+                <p className="text-sm text-amber-400">
+                  前台提示：{getFrontHintText(repliedCollab.replyType)}
+                </p>
+              </div>
             </div>
           </div>
         </div>
@@ -243,7 +299,7 @@ export default function ActivityDetail() {
             <div className="flex-1">
               <h3 className="font-medium text-amber-400 mb-2">等待作者回复</h3>
               <p className="text-stone-400 text-sm">
-                协同请求已发送，等待作者确认回复。作者可选择"可加更"、"只能发进度说明"或"不参与活动"。
+                已向<strong>{pendingCollab.authorName}</strong>发送协同请求，等待确认回复。作者可选择"可加更"、"只能发进度说明"或"不参与活动"。
               </p>
             </div>
           </div>
@@ -258,9 +314,6 @@ export default function ActivityDetail() {
                 <div className="w-12 h-12 bg-amber-600/20 rounded-xl flex items-center justify-center">
                   <Users className="w-6 h-6 text-amber-500" />
                 </div>
-                <span className="text-xs text-ink-500 bg-ink-800/20 px-2 py-1 rounded-full">
-                  +12.5%
-                </span>
               </div>
               <p className="text-3xl font-serif font-bold text-stone-100 mb-1">
                 {stats.participantCount.toLocaleString()}
@@ -273,9 +326,6 @@ export default function ActivityDetail() {
                 <div className="w-12 h-12 bg-ink-800/20 rounded-xl flex items-center justify-center">
                   <MessageSquare className="w-6 h-6 text-ink-500" />
                 </div>
-                <span className="text-xs text-ink-500 bg-ink-800/20 px-2 py-1 rounded-full">
-                  +8.3%
-                </span>
               </div>
               <p className="text-3xl font-serif font-bold text-stone-100 mb-1">
                 {stats.validUrgeCount.toLocaleString()}
@@ -288,9 +338,6 @@ export default function ActivityDetail() {
                 <div className="w-12 h-12 bg-rust-800/20 rounded-xl flex items-center justify-center">
                   <TrendingUp className="w-6 h-6 text-rust-500" />
                 </div>
-                <span className="text-xs text-ink-500 bg-ink-800/20 px-2 py-1 rounded-full">
-                  +15.2%
-                </span>
               </div>
               <p className="text-3xl font-serif font-bold text-stone-100 mb-1">
                 {stats.returnReaderCount.toLocaleString()}
@@ -429,23 +476,27 @@ export default function ActivityDetail() {
                   <MessageSquare className="w-5 h-5 text-amber-500" />
                   高频关键词
                 </h3>
-                <div className="flex flex-wrap gap-3">
-                  {stats.topKeywords.map((keyword, index) => (
-                    <div
-                      key={keyword.word}
-                      className="group relative px-4 py-2 rounded-xl bg-gradient-to-br from-amber-600/20 to-amber-700/10 border border-amber-600/30 hover:border-amber-500/50 transition-all duration-300 cursor-default"
-                      style={{
-                        fontSize: `${Math.max(14, 24 - index * 1.5)}px`,
-                        fontWeight: index < 3 ? 600 : 400,
-                      }}
-                    >
-                      <span className="text-amber-400">{keyword.word}</span>
-                      <span className="ml-2 text-xs text-amber-600 bg-amber-600/20 px-1.5 py-0.5 rounded">
-                        {keyword.count}
-                      </span>
-                    </div>
-                  ))}
-                </div>
+                {stats.topKeywords.length > 0 ? (
+                  <div className="flex flex-wrap gap-3">
+                    {stats.topKeywords.map((keyword, index) => (
+                      <div
+                        key={keyword.word}
+                        className="group relative px-4 py-2 rounded-xl bg-gradient-to-br from-amber-600/20 to-amber-700/10 border border-amber-600/30 hover:border-amber-500/50 transition-all duration-300 cursor-default"
+                        style={{
+                          fontSize: `${Math.max(14, 24 - index * 1.5)}px`,
+                          fontWeight: index < 3 ? 600 : 400,
+                        }}
+                      >
+                        <span className="text-amber-400">{keyword.word}</span>
+                        <span className="ml-2 text-xs text-amber-600 bg-amber-600/20 px-1.5 py-0.5 rounded">
+                          {keyword.count}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-stone-500 text-sm">暂无关键词数据，等待读者留言</p>
+                )}
               </div>
             </div>
           )}
@@ -453,40 +504,44 @@ export default function ActivityDetail() {
           {activeTab === 'comments' && (
             <div className="card p-6 animate-slide-up">
               <h3 className="font-serif text-lg font-semibold text-stone-100 mb-6">热门留言</h3>
-              <div className="space-y-4">
-                {stats.hotComments.map((comment, index) => (
-                  <div
-                    key={comment.id}
-                    className="p-4 bg-stone-800/30 rounded-xl border border-stone-700/50 hover:border-amber-600/20 transition-all animate-slide-up"
-                    style={{ animationDelay: `${index * 50}ms` }}
-                  >
-                    <div className="flex items-start justify-between mb-2">
-                      <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 bg-gradient-to-br from-amber-500 to-amber-700 rounded-full flex items-center justify-center text-white font-medium">
-                          {comment.userName.charAt(0)}
+              {stats.hotComments.length > 0 ? (
+                <div className="space-y-4">
+                  {stats.hotComments.map((comment, index) => (
+                    <div
+                      key={comment.id}
+                      className="p-4 bg-stone-800/30 rounded-xl border border-stone-700/50 hover:border-amber-600/20 transition-all animate-slide-up"
+                      style={{ animationDelay: `${index * 50}ms` }}
+                    >
+                      <div className="flex items-start justify-between mb-2">
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 bg-gradient-to-br from-amber-500 to-amber-700 rounded-full flex items-center justify-center text-white font-medium">
+                            {comment.userName?.charAt(0) || '?'}
+                          </div>
+                          <div>
+                            <p className="font-medium text-stone-100">{comment.userName || '匿名'}</p>
+                            <p className="text-xs text-stone-500">
+                              {comment.createdAt ? new Date(comment.createdAt).toLocaleString('zh-CN') : ''}
+                            </p>
+                          </div>
                         </div>
-                        <div>
-                          <p className="font-medium text-stone-100">{comment.userName}</p>
-                          <p className="text-xs text-stone-500">
-                            {new Date(comment.createdAt).toLocaleString('zh-CN')}
-                          </p>
+                        <div className="flex items-center gap-3">
+                          <span className={`tag ${getSentimentClass(comment.sentiment)} flex items-center`}>
+                            {getSentimentIcon(comment.sentiment)}
+                            {getSentimentLabel(comment.sentiment)}
+                          </span>
+                          <span className="flex items-center gap-1 text-stone-400 text-sm">
+                            <ThumbsUp className="w-4 h-4" />
+                            {(comment.likes ?? 0).toLocaleString()}
+                          </span>
                         </div>
                       </div>
-                      <div className="flex items-center gap-3">
-                        <span className={`tag ${getSentimentClass(comment.sentiment)} flex items-center`}>
-                          {getSentimentIcon(comment.sentiment)}
-                          {getSentimentLabel(comment.sentiment)}
-                        </span>
-                        <span className="flex items-center gap-1 text-stone-400 text-sm">
-                          <ThumbsUp className="w-4 h-4" />
-                          {comment.likes.toLocaleString()}
-                        </span>
-                      </div>
+                      <p className="text-stone-200 ml-13 pl-[52px]">{comment.content}</p>
                     </div>
-                    <p className="text-stone-200 pl-13 ml-13">{comment.content}</p>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-center py-12 text-stone-500">暂无留言数据</p>
+              )}
             </div>
           )}
         </>
