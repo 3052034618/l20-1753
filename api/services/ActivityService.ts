@@ -18,8 +18,8 @@ export class ActivityService {
     activityRepository.update(id, updates);
   }
 
-  getActivityStats(activityId: string): ActivityStats | undefined {
-    return activityRepository.getStats(activityId);
+  getActivityStats(activityId: string, days?: number): ActivityStats | undefined {
+    return activityRepository.getStats(activityId, days);
   }
 }
 

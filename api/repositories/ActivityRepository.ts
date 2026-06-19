@@ -128,7 +128,7 @@ export class ActivityRepository {
     }
   }
 
-  getStats(activityId: string): ActivityStats | undefined {
+  getStats(activityId: string, days?: number): ActivityStats | undefined {
     const statsRow = db.prepare('SELECT * FROM activity_stats WHERE activity_id = ?').get(activityId) as {
       id: string;
       activity_id: string;
@@ -140,9 +140,13 @@ export class ActivityRepository {
 
     if (!statsRow) return undefined;
 
+    const timeFilter = days
+      ? ` AND created_at >= datetime('now', '-${days} days')`
+      : '';
+
     const commentRows = db.prepare(`
       SELECT * FROM comments
-      WHERE activity_id = ?
+      WHERE activity_id = ?${timeFilter}
       ORDER BY likes DESC
       LIMIT 10
     `).all(activityId) as CommentRow[];
@@ -150,7 +154,7 @@ export class ActivityRepository {
     const comments = commentRows.map(this.mapRowToComment);
 
     const allCommentRows = db.prepare(
-      'SELECT sentiment FROM comments WHERE activity_id = ?'
+      `SELECT sentiment FROM comments WHERE activity_id = ?${timeFilter}`
     ).all(activityId) as { sentiment: string }[];
 
     const sentimentCounts = { positive: 0, neutral: 0, negative: 0 };
@@ -166,7 +170,7 @@ export class ActivityRepository {
       : statsRow.positive_rate;
 
     const trendData = this.generateTrendData(activityId, statsRow.participant_count);
-    const topKeywords = this.extractKeywords(activityId);
+    const topKeywords = this.extractKeywords(activityId, days);
 
     return {
       activityId: statsRow.activity_id,
@@ -212,9 +216,12 @@ export class ActivityRepository {
     return result;
   }
 
-  private extractKeywords(activityId: string): { word: string; count: number }[] {
+  private extractKeywords(activityId: string, days?: number): { word: string; count: number }[] {
+    const timeFilter = days
+      ? ` AND created_at >= datetime('now', '-${days} days')`
+      : '';
     const allCommentRows = db.prepare(
-      'SELECT content FROM comments WHERE activity_id = ?'
+      `SELECT content FROM comments WHERE activity_id = ?${timeFilter}`
     ).all(activityId) as { content: string }[];
 
     const keywords = ['催更', '加更', '好看', '期待', '更新', '番外', '伏笔', '剧情', '作者', '支持', '精彩', '反转', '质量', '身体', '喜欢'];

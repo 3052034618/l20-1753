@@ -12,7 +12,7 @@ interface StoreState {
 
   fetchBooks: (search?: string, category?: string) => Promise<void>;
   fetchActivities: (status?: Activity['status']) => Promise<void>;
-  fetchActivityStats: (activityId: string) => Promise<void>;
+  fetchActivityStats: (activityId: string, days?: number) => Promise<void>;
   fetchCollaborations: (status?: CollaborationRequest['status']) => Promise<void>;
   createActivity: (data: Omit<Activity, 'id' | 'createdAt'>) => Promise<Activity>;
   updateActivity: (id: string, updates: Partial<Activity>) => Promise<void>;
@@ -59,10 +59,13 @@ export const useStore = create<StoreState>((set, get) => ({
     }
   },
 
-  fetchActivityStats: async (activityId) => {
+  fetchActivityStats: async (activityId, days) => {
     set({ loading: { ...get().loading, [`stats_${activityId}`]: true } });
     try {
-      const stats = await api.get<ActivityStats>(`/activities/${activityId}/stats`);
+      const url = days
+        ? `/activities/${activityId}/stats?days=${days}`
+        : `/activities/${activityId}/stats`;
+      const stats = await api.get<ActivityStats>(url);
       set({
         activityStats: { ...get().activityStats, [activityId]: stats },
       });
@@ -149,9 +152,16 @@ export const useStore = create<StoreState>((set, get) => ({
     try {
       await api.put(`/collaborations/${id}`, updates);
       set({
-        collaborations: get().collaborations.map((c) =>
-          c.id === id ? { ...c, ...updates } : c
-        ),
+        collaborations: get().collaborations.map((c) => {
+          if (c.id !== id) return c;
+          const updated = { ...c, ...updates };
+          if (updates.status === 'pending') {
+            updated.replyType = undefined;
+            updated.replyNote = undefined;
+            updated.repliedAt = undefined;
+          }
+          return updated;
+        }),
       });
     } finally {
       set({ loading: { ...get().loading, [`updateCollab_${id}`]: false } });

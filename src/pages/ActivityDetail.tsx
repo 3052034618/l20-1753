@@ -1,12 +1,12 @@
-import { useEffect, useMemo, useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useEffect, useMemo, useState, useCallback } from 'react';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { useStore } from '../store/useStore.ts';
 import {
   ACTIVITY_STATUS_LABELS,
   TARGET_TYPE_LABELS,
   REPLY_TYPE_LABELS,
 } from '../../shared/types.ts';
-import type { Comment, CollaborationRequest } from '../../shared/types.ts';
+import type { Comment, CollaborationRequest, Activity } from '../../shared/types.ts';
 import {
   Users,
   MessageSquare,
@@ -32,6 +32,11 @@ import {
   Tag,
   AlertCircle,
   CheckCircle2,
+  Filter,
+  ChevronLeft,
+  ChevronRight,
+  Timer,
+  LayoutDashboard,
 } from 'lucide-react';
 import {
   AreaChart,
@@ -48,10 +53,15 @@ import {
 } from 'recharts';
 
 type SentimentFilter = Comment['sentiment'] | 'all';
+type TimeRange = 'all' | 1 | 3 | 7;
+type StatusFilter = Activity['status'] | 'all';
+type TargetFilter = Activity['targetType'] | 'all';
 
 export default function ActivityDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const [urlParams, setUrlParams] = useSearchParams();
+
   const {
     activities,
     activityStats,
@@ -73,19 +83,61 @@ export default function ActivityDetail() {
   const [showExpectationDialog, setShowExpectationDialog] = useState(false);
   const [expectationDraft, setExpectationDraft] = useState('');
   const [editingCollabId, setEditingCollabId] = useState<string | null>(null);
+  const [timeRange, setTimeRange] = useState<TimeRange>(
+    (Number(urlParams.get('days')) as TimeRange) || 'all'
+  );
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>(
+    (urlParams.get('f_status') as StatusFilter) || 'all'
+  );
+  const [targetFilter, setTargetFilter] = useState<TargetFilter>(
+    (urlParams.get('f_target') as TargetFilter) || 'all'
+  );
+  const [bookFilter, setBookFilter] = useState<string>(urlParams.get('f_book') || 'all');
+
+  const syncUrlParams = useCallback(() => {
+    const params: Record<string, string> = {};
+    if (timeRange !== 'all') params.days = String(timeRange);
+    if (statusFilter !== 'all') params.f_status = statusFilter;
+    if (targetFilter !== 'all') params.f_target = targetFilter;
+    if (bookFilter !== 'all') params.f_book = bookFilter;
+    const next = new URLSearchParams(params);
+    if (next.toString() !== urlParams.toString()) {
+      setUrlParams(next, { replace: true });
+    }
+  }, [timeRange, statusFilter, targetFilter, bookFilter, urlParams, setUrlParams]);
+
+  useEffect(() => {
+    syncUrlParams();
+  }, [syncUrlParams]);
 
   useEffect(() => {
     fetchActivities();
     fetchCollaborations();
     fetchBooks();
+  }, [fetchActivities, fetchCollaborations, fetchBooks]);
+
+  useEffect(() => {
     if (id) {
-      fetchActivityStats(id);
+      fetchActivityStats(id, timeRange === 'all' ? undefined : timeRange);
     }
-  }, [fetchActivities, fetchActivityStats, fetchCollaborations, fetchBooks, id]);
+  }, [id, timeRange, fetchActivityStats]);
 
   const activity = activities.find((a) => a.id === id);
   const stats = id ? activityStats[id] : undefined;
   const activityCollabs = collaborations.filter((c) => c.activityId === id);
+
+  const filteredActivities = useMemo(() => {
+    return activities.filter((a) => {
+      if (statusFilter !== 'all' && a.status !== statusFilter) return false;
+      if (targetFilter !== 'all' && a.targetType !== targetFilter) return false;
+      if (bookFilter !== 'all' && !a.bookIds?.includes(bookFilter)) return false;
+      return true;
+    });
+  }, [activities, statusFilter, targetFilter, bookFilter]);
+
+  const currentActivityIndex = filteredActivities.findIndex((a) => a.id === id);
+  const prevActivity = currentActivityIndex > 0 ? filteredActivities[currentActivityIndex - 1] : null;
+  const nextActivity = currentActivityIndex < filteredActivities.length - 1 ? filteredActivities[currentActivityIndex + 1] : null;
 
   const filteredComments = useMemo(() => {
     if (!stats) return [] as Comment[];
@@ -127,6 +179,19 @@ export default function ActivityDetail() {
     return d.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' });
   };
 
+  const handleTimeRangeChange = (range: TimeRange) => {
+    setTimeRange(range);
+    setActiveKeyword(null);
+    setSentimentFilter('all');
+  };
+
+  const resetFilters = () => {
+    setStatusFilter('all');
+    setTargetFilter('all');
+    setBookFilter('all');
+  };
+  const hasActiveFilter = statusFilter !== 'all' || targetFilter !== 'all' || bookFilter !== 'all';
+
   if (!activity) {
     return (
       <div className="p-8 flex items-center justify-center min-h-[60vh]">
@@ -140,58 +205,42 @@ export default function ActivityDetail() {
 
   const getStatusClass = (status: typeof activity.status) => {
     switch (status) {
-      case 'active':
-        return 'tag-active';
-      case 'draft':
-        return 'tag-pending';
-      case 'ended':
-        return 'tag-ended';
+      case 'active': return 'tag-active';
+      case 'draft': return 'tag-pending';
+      case 'ended': return 'tag-ended';
     }
   };
 
   const getSentimentClass = (sentiment: Comment['sentiment']) => {
     switch (sentiment) {
-      case 'positive':
-        return 'tag-positive';
-      case 'negative':
-        return 'tag-negative';
-      case 'neutral':
-        return 'tag-neutral';
+      case 'positive': return 'tag-positive';
+      case 'negative': return 'tag-negative';
+      case 'neutral': return 'tag-neutral';
     }
   };
 
   const getSentimentLabel = (sentiment: Comment['sentiment']) => {
     switch (sentiment) {
-      case 'positive':
-        return '正向';
-      case 'negative':
-        return '负向';
-      case 'neutral':
-        return '中性';
+      case 'positive': return '正向';
+      case 'negative': return '负向';
+      case 'neutral': return '中性';
     }
   };
 
   const getSentimentIcon = (sentiment: Comment['sentiment']) => {
     switch (sentiment) {
-      case 'positive':
-        return <ThumbsUp className="w-3 h-3 mr-1" />;
-      case 'negative':
-        return <ThumbsDown className="w-3 h-3 mr-1" />;
-      case 'neutral':
-        return <HelpCircle className="w-3 h-3 mr-1" />;
+      case 'positive': return <ThumbsUp className="w-3 h-3 mr-1" />;
+      case 'negative': return <ThumbsDown className="w-3 h-3 mr-1" />;
+      case 'neutral': return <HelpCircle className="w-3 h-3 mr-1" />;
     }
   };
 
   const getFrontHintText = (replyType: CollaborationRequest['replyType']) => {
     switch (replyType) {
-      case 'can_update':
-        return '作者已确认可加更，敬请期待！';
-      case 'progress_only':
-        return '作者将发布进度说明，感谢理解与支持';
-      case 'not_participate':
-        return '作者暂不参与本次活动，感谢读者理解';
-      default:
-        return '';
+      case 'can_update': return '作者已确认可加更，敬请期待！';
+      case 'progress_only': return '作者将发布进度说明，感谢理解与支持';
+      case 'not_participate': return '作者暂不参与本次活动，感谢读者理解';
+      default: return '';
     }
   };
 
@@ -206,22 +255,18 @@ export default function ActivityDetail() {
   const generateExpectationSummary = (): string => {
     if (!stats) return '';
     const { participantCount, validUrgeCount, positiveRate, topKeywords, hotComments } = stats;
-
     const top3Keywords = topKeywords.slice(0, 3).map((k) => k.word);
     const representativeComments = hotComments
       .slice(0, 3)
       .map((c) => `「${c.content.length > 30 ? c.content.slice(0, 30) + '…' : c.content}」`)
       .join('；');
-
     const positiveComments = hotComments.filter((c) => c.sentiment === 'positive').length;
     const concernWords = topKeywords
       .filter((k) => ['身体', '质量', '剧情', '伏笔'].includes(k.word))
       .map((k) => k.word);
-
     let summary = `读者们对本次催更活动反响热烈，目前已有${participantCount.toLocaleString()}人参与活动，有效催更${validUrgeCount.toLocaleString()}次。读者留言中正面评价占比${(
       positiveRate * 100
     ).toFixed(0)}%，${positiveComments > 0 ? `共${positiveComments}条留言明确表达支持与鼓励，` : ''}`;
-
     if (top3Keywords.length) {
       summary += `大家最关心的话题集中在「${top3Keywords.join('」、「')}」。`;
     }
@@ -232,7 +277,6 @@ export default function ActivityDetail() {
       summary += `\n\n读者也在留言中反复提到：${concernWords.join('、')}等方面，希望作者能在创作节奏中兼顾质量与健康。`;
     }
     summary += `\n\n请您根据自身创作节奏，选择合适的方式回应读者期待，感谢您的配合！`;
-
     return summary;
   };
 
@@ -249,14 +293,11 @@ export default function ActivityDetail() {
 
   const handleSendExpectation = async () => {
     if (!expectationDraft.trim() || !activity) return;
-
     try {
       if (editingCollabId) {
         await updateCollaboration(editingCollabId, {
           readerExpectations: expectationDraft,
           status: 'pending',
-          replyType: undefined,
-          replyNote: undefined,
         });
       } else {
         const bookId = activity.bookIds[0];
@@ -301,10 +342,75 @@ export default function ActivityDetail() {
 
   return (
     <div className="p-8 animate-fade-in">
-      <button onClick={() => navigate(-1)} className="btn-ghost mb-6 flex items-center gap-2 -ml-4">
+      <button onClick={() => navigate('/')} className="btn-ghost mb-4 flex items-center gap-2 -ml-4">
         <ArrowLeft className="w-4 h-4" />
         返回活动列表
       </button>
+
+      <div className="card p-4 mb-6">
+        <div className="flex items-center justify-between flex-wrap gap-3">
+          <div className="flex items-center gap-3 flex-wrap">
+            <div className="flex items-center gap-2 text-stone-400">
+              <Filter className="w-4 h-4" />
+              <span className="text-sm font-medium">活动切换</span>
+            </div>
+            <select
+              value={bookFilter}
+              onChange={(e) => setBookFilter(e.target.value)}
+              className="input-field w-auto py-1.5 text-sm"
+            >
+              <option value="all">全部作品</option>
+              {books.map((b) => (
+                <option key={b.id} value={b.id}>{b.title}</option>
+              ))}
+            </select>
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}
+              className="input-field w-auto py-1.5 text-sm"
+            >
+              <option value="all">全部状态</option>
+              <option value="active">进行中</option>
+              <option value="draft">草稿</option>
+              <option value="ended">已结束</option>
+            </select>
+            <select
+              value={targetFilter}
+              onChange={(e) => setTargetFilter(e.target.value as TargetFilter)}
+              className="input-field w-auto py-1.5 text-sm"
+            >
+              <option value="all">全部目标动作</option>
+              {(Object.keys(TARGET_TYPE_LABELS) as Activity['targetType'][]).map((t) => (
+                <option key={t} value={t}>{TARGET_TYPE_LABELS[t]}</option>
+              ))}
+            </select>
+            {hasActiveFilter && (
+              <button onClick={resetFilters} className="btn-ghost py-1 px-2 text-xs">
+                <X className="w-3 h-3 inline mr-1" />重置
+              </button>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-stone-500">
+              {currentActivityIndex + 1} / {filteredActivities.length}
+            </span>
+            <button
+              onClick={() => prevActivity && navigate(`/activity/${prevActivity.id}`)}
+              disabled={!prevActivity}
+              className="btn-ghost p-1.5 disabled:opacity-30"
+            >
+              <ChevronLeft className="w-4 h-4" />
+            </button>
+            <button
+              onClick={() => nextActivity && navigate(`/activity/${nextActivity.id}`)}
+              disabled={!nextActivity}
+              className="btn-ghost p-1.5 disabled:opacity-30"
+            >
+              <ChevronRight className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      </div>
 
       <div className="flex items-start justify-between mb-8 flex-wrap gap-4">
         <div className="flex-1 min-w-0">
@@ -344,20 +450,14 @@ export default function ActivityDetail() {
         <div className="flex gap-3">
           {!pendingCollab && (
             <button
-              onClick={() => openExpectationDialog()}
+              onClick={() => openExpectationDialog(latestCollab && latestCollab.status === 'replied' ? latestCollab : undefined)}
               disabled={loading.createCollab || loading.updateCollab}
               className="btn-outline flex items-center gap-2"
             >
               {latestCollab ? (
-                <>
-                  <Edit3 className="w-4 h-4" />
-                  重发读者期待
-                </>
+                <><Edit3 className="w-4 h-4" />重发读者期待</>
               ) : (
-                <>
-                  <Send className="w-4 h-4" />
-                  发送协同请求
-                </>
+                <><Send className="w-4 h-4" />发送协同请求</>
               )}
             </button>
           )}
@@ -420,7 +520,7 @@ export default function ActivityDetail() {
                 </button>
               </div>
               <p className="text-stone-400 text-sm">
-                已向<strong>{pendingCollab.authorName}</strong>发送协同请求，等待确认回复。作者可选择"可加更"、"只能发进度说明"或"不参与活动"。
+                已向<strong>{pendingCollab.authorName}</strong>发送协同请求，等待确认回复。
               </p>
               <div className="mt-3 p-3 bg-stone-800/50 rounded-lg border border-stone-700/30">
                 <p className="text-xs text-stone-500 mb-1">已发送的读者期待：</p>
@@ -445,7 +545,6 @@ export default function ActivityDetail() {
               </p>
               <p className="text-sm text-stone-500">参与人数</p>
             </div>
-
             <div className="stat-card animate-slide-up" style={{ animationDelay: '50ms' }}>
               <div className="flex items-center justify-between mb-3">
                 <div className="w-12 h-12 bg-ink-800/20 rounded-xl flex items-center justify-center">
@@ -457,7 +556,6 @@ export default function ActivityDetail() {
               </p>
               <p className="text-sm text-stone-500">有效催更数</p>
             </div>
-
             <div className="stat-card animate-slide-up" style={{ animationDelay: '100ms' }}>
               <div className="flex items-center justify-between mb-3">
                 <div className="w-12 h-12 bg-rust-800/20 rounded-xl flex items-center justify-center">
@@ -469,7 +567,6 @@ export default function ActivityDetail() {
               </p>
               <p className="text-sm text-stone-500">回流阅读人数</p>
             </div>
-
             <div className="stat-card animate-slide-up" style={{ animationDelay: '150ms' }}>
               <div className="flex items-center justify-between mb-3">
                 <div className="w-12 h-12 bg-ink-800/20 rounded-xl flex items-center justify-center">
@@ -494,29 +591,47 @@ export default function ActivityDetail() {
             </div>
           </div>
 
-          <div className="flex gap-2 mb-6">
-            <button
-              onClick={() => setActiveTab('overview')}
-              className={`px-4 py-2 rounded-lg font-medium transition-all ${
-                activeTab === 'overview'
-                  ? 'bg-amber-600/20 text-amber-400 border border-amber-500/30'
-                  : 'text-stone-400 hover:text-stone-200'
-              }`}
-            >
-              <BarChart3 className="w-4 h-4 inline mr-2" />
-              数据概览
-            </button>
-            <button
-              onClick={() => setActiveTab('comments')}
-              className={`px-4 py-2 rounded-lg font-medium transition-all ${
-                activeTab === 'comments'
-                  ? 'bg-amber-600/20 text-amber-400 border border-amber-500/30'
-                  : 'text-stone-400 hover:text-stone-200'
-              }`}
-            >
-              <MessageSquare className="w-4 h-4 inline mr-2" />
-              读者反应分析 ({stats.hotComments.length})
-            </button>
+          <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
+            <div className="flex gap-2">
+              <button
+                onClick={() => setActiveTab('overview')}
+                className={`px-4 py-2 rounded-lg font-medium transition-all ${
+                  activeTab === 'overview'
+                    ? 'bg-amber-600/20 text-amber-400 border border-amber-500/30'
+                    : 'text-stone-400 hover:text-stone-200'
+                }`}
+              >
+                <BarChart3 className="w-4 h-4 inline mr-2" />
+                数据概览
+              </button>
+              <button
+                onClick={() => setActiveTab('comments')}
+                className={`px-4 py-2 rounded-lg font-medium transition-all ${
+                  activeTab === 'comments'
+                    ? 'bg-amber-600/20 text-amber-400 border border-amber-500/30'
+                    : 'text-stone-400 hover:text-stone-200'
+                }`}
+              >
+                <MessageSquare className="w-4 h-4 inline mr-2" />
+                读者反应分析 ({stats.hotComments.length})
+              </button>
+            </div>
+            <div className="flex items-center gap-2">
+              <Timer className="w-4 h-4 text-stone-400" />
+              {(['all', 1, 3, 7] as TimeRange[]).map((range) => (
+                <button
+                  key={String(range)}
+                  onClick={() => handleTimeRangeChange(range)}
+                  className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
+                    timeRange === range
+                      ? 'bg-amber-600/20 text-amber-400 border border-amber-500/30'
+                      : 'text-stone-400 hover:text-stone-200 hover:bg-stone-700/30'
+                  }`}
+                >
+                  {range === 'all' ? '全部' : `近${range}天`}
+                </button>
+              ))}
+            </div>
           </div>
 
           {activeTab === 'overview' && (
@@ -546,14 +661,7 @@ export default function ActivityDetail() {
                           color: '#FAFAF9',
                         }}
                       />
-                      <Area
-                        type="monotone"
-                        dataKey="count"
-                        stroke="#D97706"
-                        strokeWidth={2}
-                        fill="url(#colorCount)"
-                        name="参与人数"
-                      />
+                      <Area type="monotone" dataKey="count" stroke="#D97706" strokeWidth={2} fill="url(#colorCount)" name="参与人数" />
                     </AreaChart>
                   </ResponsiveContainer>
                 </div>
@@ -567,30 +675,13 @@ export default function ActivityDetail() {
                 <div className="h-[200px]">
                   <ResponsiveContainer width="100%" height="100%">
                     <RechartsPieChart>
-                      <Pie
-                        data={sentimentData}
-                        cx="50%"
-                        cy="50%"
-                        innerRadius={50}
-                        outerRadius={80}
-                        paddingAngle={5}
-                        dataKey="value"
-                      >
+                      <Pie data={sentimentData} cx="50%" cy="50%" innerRadius={50} outerRadius={80} paddingAngle={5} dataKey="value">
                         {sentimentData.map((entry, index) => (
                           <Cell key={`cell-${index}`} fill={entry.color} />
                         ))}
                       </Pie>
-                      <Tooltip
-                        contentStyle={{
-                          backgroundColor: '#292524',
-                          border: '1px solid #44403C',
-                          borderRadius: '8px',
-                          color: '#FAFAF9',
-                        }}
-                      />
-                      <Legend
-                        formatter={(value) => <span className="text-stone-300">{value}</span>}
-                      />
+                      <Tooltip contentStyle={{ backgroundColor: '#292524', border: '1px solid #44403C', borderRadius: '8px', color: '#FAFAF9' }} />
+                      <Legend formatter={(value) => <span className="text-stone-300">{value}</span>} />
                     </RechartsPieChart>
                   </ResponsiveContainer>
                 </div>
@@ -600,9 +691,7 @@ export default function ActivityDetail() {
                 <h3 className="font-serif text-lg font-semibold text-stone-100 mb-4 flex items-center gap-2">
                   <Tag className="w-5 h-5 text-amber-500" />
                   高频关键词
-                  <span className="text-sm font-normal text-stone-500 ml-2">
-                    点击关键词可筛选下方留言
-                  </span>
+                  <span className="text-sm font-normal text-stone-500 ml-2">点击关键词可筛选下方留言</span>
                 </h3>
                 {stats.topKeywords.length > 0 ? (
                   <div className="flex flex-wrap gap-3">
@@ -620,19 +709,10 @@ export default function ActivityDetail() {
                               ? 'bg-amber-600/40 border-amber-400 ring-2 ring-amber-500/50'
                               : 'bg-gradient-to-br from-amber-600/20 to-amber-700/10 border-amber-600/30 hover:border-amber-500/50 cursor-pointer'
                           }`}
-                          style={{
-                            fontSize: `${Math.max(14, 24 - index * 1.5)}px`,
-                            fontWeight: index < 3 ? 600 : 400,
-                          }}
+                          style={{ fontSize: `${Math.max(14, 24 - index * 1.5)}px`, fontWeight: index < 3 ? 600 : 400 }}
                         >
-                          <span className={isActive ? 'text-amber-100' : 'text-amber-400'}>
-                            {keyword.word}
-                          </span>
-                          <span
-                            className={`ml-2 text-xs px-1.5 py-0.5 rounded ${
-                              isActive ? 'text-amber-100 bg-amber-400/30' : 'text-amber-600 bg-amber-600/20'
-                            }`}
-                          >
+                          <span className={isActive ? 'text-amber-100' : 'text-amber-400'}>{keyword.word}</span>
+                          <span className={`ml-2 text-xs px-1.5 py-0.5 rounded ${isActive ? 'text-amber-100 bg-amber-400/30' : 'text-amber-600 bg-amber-600/20'}`}>
                             {keyword.count}
                           </span>
                         </button>
@@ -687,13 +767,7 @@ export default function ActivityDetail() {
                         >
                           {s === 'all' ? '全部' : s === 'positive' ? '正向' : s === 'neutral' ? '中性' : '负向'}
                           <span className="ml-1 text-xs opacity-80">
-                            {s === 'all'
-                              ? sentimentCounts.all
-                              : s === 'positive'
-                              ? sentimentCounts.positive
-                              : s === 'neutral'
-                              ? sentimentCounts.neutral
-                              : sentimentCounts.negative}
+                            {s === 'all' ? sentimentCounts.all : s === 'positive' ? sentimentCounts.positive : s === 'neutral' ? sentimentCounts.neutral : sentimentCounts.negative}
                           </span>
                         </button>
                       ))}
@@ -714,22 +788,14 @@ export default function ActivityDetail() {
                                 {comment.userName?.charAt(0) || '?'}
                               </div>
                               <div>
-                                <p className="font-medium text-stone-100">
-                                  {comment.userName || '匿名'}
-                                </p>
+                                <p className="font-medium text-stone-100">{comment.userName || '匿名'}</p>
                                 <p className="text-xs text-stone-500">
-                                  {comment.createdAt
-                                    ? new Date(comment.createdAt).toLocaleString('zh-CN')
-                                    : ''}
+                                  {comment.createdAt ? new Date(comment.createdAt).toLocaleString('zh-CN') : ''}
                                 </p>
                               </div>
                             </div>
                             <div className="flex items-center gap-3">
-                              <span
-                                className={`tag ${getSentimentClass(
-                                  comment.sentiment
-                                )} flex items-center`}
-                              >
+                              <span className={`tag ${getSentimentClass(comment.sentiment)} flex items-center`}>
                                 {getSentimentIcon(comment.sentiment)}
                                 {getSentimentLabel(comment.sentiment)}
                               </span>
@@ -751,7 +817,11 @@ export default function ActivityDetail() {
                         <>
                           <AlertCircle className="w-10 h-10 mx-auto mb-3 opacity-50" />
                           <p className="text-lg mb-1">暂无留言数据</p>
-                          <p className="text-sm">等读者陆续参与催更活动后再来分析</p>
+                          <p className="text-sm">
+                            {timeRange !== 'all'
+                              ? `近${timeRange}天暂无留言，试试切换到「全部」`
+                              : '等读者陆续参与催更活动后再来分析'}
+                          </p>
                         </>
                       ) : (
                         <>
@@ -759,13 +829,7 @@ export default function ActivityDetail() {
                           <p className="text-lg mb-1">没有匹配的留言</p>
                           <p className="text-sm">
                             试试选择
-                            <button
-                              onClick={() => {
-                                setSentimentFilter('all');
-                                setActiveKeyword(null);
-                              }}
-                              className="text-amber-400 underline mx-1"
-                            >
+                            <button onClick={() => { setSentimentFilter('all'); setActiveKeyword(null); }} className="text-amber-400 underline mx-1">
                               全部留言
                             </button>
                             看看
@@ -786,36 +850,22 @@ export default function ActivityDetail() {
                   {stats.topKeywords.length > 0 ? (
                     <div className="space-y-2">
                       {stats.topKeywords.map((kw) => {
-                        const hitCount = stats.hotComments.filter((c) =>
-                          c.content.includes(kw.word)
-                        ).length;
+                        const hitCount = stats.hotComments.filter((c) => c.content.includes(kw.word)).length;
                         const isActive = activeKeyword === kw.word;
                         return (
                           <button
                             key={kw.word}
                             onClick={() => setActiveKeyword(isActive ? null : kw.word)}
                             className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-sm transition-all ${
-                              isActive
-                                ? 'bg-amber-600/30 border border-amber-500/40'
-                                : 'bg-stone-800/30 border border-stone-700/40 hover:border-amber-600/30'
+                              isActive ? 'bg-amber-600/30 border border-amber-500/40' : 'bg-stone-800/30 border border-stone-700/40 hover:border-amber-600/30'
                             }`}
                           >
-                            <span className={isActive ? 'text-amber-300' : 'text-stone-300'}>
-                              {kw.word}
-                            </span>
+                            <span className={isActive ? 'text-amber-300' : 'text-stone-300'}>{kw.word}</span>
                             <span className="flex items-center gap-2">
-                              <span
-                                className={`text-xs ${
-                                  isActive ? 'text-amber-400/80' : 'text-stone-500'
-                                }`}
-                              >
+                              <span className={`text-xs ${isActive ? 'text-amber-400/80' : 'text-stone-500'}`}>
                                 {hitCount}条留言
                               </span>
-                              <CheckCircle2
-                                className={`w-3.5 h-3.5 ${
-                                  isActive ? 'text-amber-400' : 'text-stone-600'
-                                }`}
-                              />
+                              <CheckCircle2 className={`w-3.5 h-3.5 ${isActive ? 'text-amber-400' : 'text-stone-600'}`} />
                             </span>
                           </button>
                         );
@@ -879,14 +929,11 @@ export default function ActivityDetail() {
                 </h3>
                 <p className="text-sm text-stone-500 mt-1">
                   {editingCollabId
-                    ? '系统已填入之前发送的内容，您可编辑后重新发送，作者端会收到最新版本'
+                    ? '重新发送后，旧的回复记录将被清除，请求回到干净的待回复状态'
                     : '已基于真实留言自动生成摘要，您可编辑确认后发送给作者'}
                 </p>
               </div>
-              <button
-                onClick={() => setShowExpectationDialog(false)}
-                className="btn-ghost p-2"
-              >
+              <button onClick={() => setShowExpectationDialog(false)} className="btn-ghost p-2">
                 <X className="w-5 h-5" />
               </button>
             </div>
@@ -899,10 +946,7 @@ export default function ActivityDetail() {
                 <Sparkles className="w-4 h-4 inline mr-1" />
                 重新生成摘要
               </button>
-              <button
-                onClick={() => setExpectationDraft('')}
-                className="btn-ghost py-1.5 px-3 text-sm"
-              >
+              <button onClick={() => setExpectationDraft('')} className="btn-ghost py-1.5 px-3 text-sm">
                 清空
               </button>
             </div>
@@ -923,12 +967,7 @@ export default function ActivityDetail() {
             </div>
 
             <div className="flex justify-end gap-3 pt-4 border-t border-stone-700/50">
-              <button
-                onClick={() => setShowExpectationDialog(false)}
-                className="btn-secondary"
-              >
-                取消
-              </button>
+              <button onClick={() => setShowExpectationDialog(false)} className="btn-secondary">取消</button>
               <button
                 onClick={handleSendExpectation}
                 disabled={

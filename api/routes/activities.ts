@@ -40,7 +40,8 @@ router.put('/:id', (req, res) => {
 });
 
 router.get('/:id/stats', (req, res) => {
-  const stats = activityService.getActivityStats(req.params.id);
+  const days = req.query.days ? parseInt(req.query.days as string, 10) : undefined;
+  const stats = activityService.getActivityStats(req.params.id, days);
   if (!stats) {
     res.status(404).json({ error: '活动统计数据不存在' });
     return;

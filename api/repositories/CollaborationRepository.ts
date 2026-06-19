@@ -90,6 +90,11 @@ export class CollaborationRepository {
       setClauses.push('reply_note = ?');
       params.push(updates.replyNote ?? null);
     }
+    if (updates.status === 'pending') {
+      setClauses.push('reply_type = NULL');
+      setClauses.push('reply_note = NULL');
+      setClauses.push('replied_at = NULL');
+    }
 
     if (setClauses.length === 0) return;
 
