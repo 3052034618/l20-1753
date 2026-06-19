@@ -1,0 +1,162 @@
+@import url('https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;500;600;700&family=Inter:wght@300;400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    font-family: 'Inter', system-ui, sans-serif;
+    line-height: 1.6;
+    font-weight: 400;
+    font-synthesis: none;
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    @apply bg-stone-900 text-stone-100 min-h-screen;
+    background-image: 
+      radial-gradient(circle at 20% 20%, rgba(217, 119, 6, 0.08) 0%, transparent 50%),
+      radial-gradient(circle at 80% 80%, rgba(217, 119, 6, 0.05) 0%, transparent 50%);
+    background-attachment: fixed;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-serif;
+  }
+
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    @apply bg-stone-800;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply bg-amber-700/50 rounded-full;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-amber-600/70;
+  }
+}
+
+@layer components {
+  .card {
+    @apply bg-stone-800/80 backdrop-blur-sm rounded-xl border border-stone-700/50;
+  }
+
+  .card-amber {
+    @apply bg-amber-50/95 text-stone-900 rounded-xl border border-amber-200/50;
+    background-image: linear-gradient(135deg, #FEF3C7 0%, #FFFBEB 100%);
+  }
+
+  .btn-primary {
+    @apply px-6 py-2.5 bg-amber-600 text-white rounded-lg font-medium
+           hover:bg-amber-500 hover:shadow-glow-amber transition-all duration-300
+           active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .btn-secondary {
+    @apply px-6 py-2.5 bg-stone-700 text-stone-100 rounded-lg font-medium
+           hover:bg-stone-600 transition-all duration-300
+           active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .btn-outline {
+    @apply px-6 py-2.5 border-2 border-amber-600/50 text-amber-400 rounded-lg font-medium
+           hover:bg-amber-600/10 hover:border-amber-500 transition-all duration-300
+           active:scale-[0.98];
+  }
+
+  .btn-ghost {
+    @apply px-4 py-2 text-stone-400 rounded-lg font-medium
+           hover:text-amber-400 hover:bg-amber-600/10 transition-all duration-300;
+  }
+
+  .input-field {
+    @apply w-full px-4 py-2.5 bg-stone-800/50 border border-stone-700 rounded-lg
+           text-stone-100 placeholder-stone-500
+           focus:outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-500/20
+           transition-all duration-200;
+  }
+
+  .input-field-amber {
+    @apply w-full px-4 py-2.5 bg-white/80 border border-amber-200 rounded-lg
+           text-stone-900 placeholder-stone-500
+           focus:outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-500/20
+           transition-all duration-200;
+  }
+
+  .stat-card {
+    @apply card p-6 hover:border-amber-600/30 transition-all duration-300;
+  }
+
+  .sidebar-link {
+    @apply flex items-center gap-3 px-4 py-3 rounded-lg text-stone-400
+           hover:text-amber-400 hover:bg-amber-600/10 transition-all duration-200
+           cursor-pointer;
+  }
+
+  .sidebar-link.active {
+    @apply text-amber-400 bg-amber-600/15 border-l-2 border-amber-500;
+  }
+
+  .tag {
+    @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium;
+  }
+
+  .tag-active {
+    @apply bg-ink-800/20 text-ink-500 border border-ink-700/30;
+  }
+
+  .tag-pending {
+    @apply bg-amber-600/20 text-amber-400 border border-amber-600/30;
+  }
+
+  .tag-ended {
+    @apply bg-stone-700/50 text-stone-400 border border-stone-600/30;
+  }
+
+  .tag-positive {
+    @apply bg-ink-800/20 text-ink-500;
+  }
+
+  .tag-negative {
+    @apply bg-rust-800/20 text-rust-500;
+  }
+
+  .tag-neutral {
+    @apply bg-stone-700/50 text-stone-400;
+  }
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+
+  .paper-texture {
+    background-image: 
+      linear-gradient(135deg, #FEF3C7 0%, #FFFBEB 100%),
+      url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.08'/%3E%3C/svg%3E");
+    background-blend-mode: overlay;
+  }
+
+  .grain-overlay {
+    position: relative;
+  }
+
+  .grain-overlay::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.05'/%3E%3C/svg%3E");
+    pointer-events: none;
+    border-radius: inherit;
+  }
+}
